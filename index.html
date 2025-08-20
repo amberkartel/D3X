@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>D3X VERCEL - Dashboard (USD • Paystack)</title>
+  <script src="https://js.paystack.co/v1/inline.js"></script>
+  <style>
+    body { margin:0; font-family: 'Inter', Arial, sans-serif; background:#0b0e17; color:#fff; }
+    header { background:#11141f; padding:15px 30px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1e2235; }
+    header h1 { margin:0; font-size:20px; color:#00ffc6; }
+    header nav a { color:#fff; margin-left:20px; text-decoration:none; font-size:14px; }
+    .walletbar { padding:10px 30px; font-size:13px; color:#aaa; border-bottom:1px solid #1e2235; background:#0f1321; }
+    .container { display:flex; justify-content:center; align-items:flex-start; padding:20px; gap:20px; flex-wrap:wrap; }
+    .card { background:#151a28; border-radius:10px; padding:20px; box-shadow:0 0 20px rgba(0,0,0,0.4); flex:1 1 300px; max-width:420px; }
+    h2 { font-size:18px; margin-bottom:15px; }
+    label { display:block; margin-bottom:5px; font-size:14px; }
+    input, select { width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:none; font-size:14px; }
+    button { width:100%; padding:12px; background:#00ffc6; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
+    button:hover { background:#00d4a5; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    table th, table td { padding:8px; text-align:left; border-bottom:1px solid #22283d; }
+    .status-pending { color:orange; } .status-completed { color:#00ffc6; } .status-failed { color:red; }
+    @media(max-width:768px){ header{flex-direction:column; align-items:flex-start;} header nav{margin-top:10px;} .container{flex-direction:column; align-items:stretch;} .card{max-width:100%;} }
+    .tabs { display:flex; margin-bottom:15px; }
+    .tabs button { flex:1; padding:10px; margin:0; border-radius:6px 6px 0 0; background:#22283d; color:#fff; border:none; cursor:pointer; }
+    .tabs button.active { background:#00ffc6; color:#000; font-weight:bold; }
+    .row { display:flex; gap:10px; } .row > div { flex:1; }
+    .subtle { color:#9aa4bf; font-size:12px; }
+    .settings { margin-top:10px; display:flex; gap:10px; }
+    .settings button { flex:1; background:#1e2438; color:#fff; }
+    .settings button:hover { background:#2a3150; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>D3X VERCEL</h1>
+    <nav>
+      <a href="#">Dashboard</a>
+      <a href="#">History</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+  <div class="walletbar">
+    Wallet ID: <span id="wallet-id"></span>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <div class="tabs">
+        <button id="buyTab" class="active" onclick="showPanel('buy')">Buy</button>
+        <button id="sellTab" onclick="showPanel('sell')">Sell</button>
+      </div>
+
+      <div id="buyPanel">
+        <h2>Buy Crypto</h2>
+        <label for="buy-usd">Amount in USD</label>
+        <input type="number" id="buy-usd" placeholder="Enter USD amount" min="5" step="0.01"/>
+        <label for="buy-coin">Select Coin</label>
+        <select id="buy-coin">
+          <option value="BTC">Bitcoin (BTC)</option>
+          <option value="ETH">Ethereum (ETH)</option>
+          <option value="USDT">Tether (USDT)</option>
+        </select>
+        <button onclick="payWithPaystack()">Pay with Paystack</button>
+        <p class="subtle">Checkout is in USD via Paystack. Fulfillment is automated on your side after payment confirmation.</p>
+      </div>
+
+      <div id="sellPanel" style="display:none;">
+        <h2>Sell Crypto</h2>
+        <div class="row">
+          <div>
+            <label for="sell-coin">Coin</label>
+            <select id="sell-coin">
+              <option value="BTC">Bitcoin (BTC)</option>
+              <option value="ETH">Ethereum (ETH)</option>
+              <option value="USDT">Tether (USDT)</option>
+            </select>
+          </div>
+          <div>
+            <label for="sell-amt">Amount (coin)</label>
+            <input type="number" id="sell-amt" placeholder="0.0000" min="0.0001" step="0.0001"/>
+          </div>
+        </div>
+        <button onclick="sellCoin()">Sell to USD</button>
+        <p class="subtle">This updates your dashboard balance only. Use your admin tools for real settlements.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Your Balances</h2>
+      <p>USD: $<span id="bal-usd">0.00</span></p>
+      <p>BTC: <span id="bal-btc">0.0000</span></p>
+      <p>ETH: <span id="bal-eth">0.0000</span></p>
+      <p>USDT: <span id="bal-usdt">0.00</span></p>
+
+      <div class="settings">
+        <button id="resetWalletBtn">Reset Wallet</button>
+        <button id="newWalletBtn">New Wallet</button>
+      </div>
+      <p class="subtle">Balances and history are stored in your browser for this wallet ID.</p>
+    </div>
+
+    <div class="card">
+      <h2>Transaction History</h2>
+      <table>
+        <thead><tr><th>Type</th><th>Coin</th><th>USD</th><th>Status</th></tr></thead>
+        <tbody id="history"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // === Wallet Identity ===
+    function generateWalletId(){
+      return "D3X-" + Math.random().toString(36).substring(2,10).toUpperCase();
+    }
+    let walletId = localStorage.getItem("walletId");
+    if(!walletId){ walletId = generateWalletId(); localStorage.setItem("walletId", walletId); }
+    document.getElementById("wallet-id").textContent = walletId;
+
+    // === Rates & State ===
+    const rateMap = { BTC: 65000, ETH: 2800, USDT: 1 };
+    let balances = JSON.parse(localStorage.getItem("balances")) || { USD: 0, BTC: 0, ETH: 0, USDT: 0 };
+    let historyData = JSON.parse(localStorage.getItem("history")) || [];
+
+    // === UI Renderers ===
+    function renderBalances(){
+      document.getElementById("bal-usd").textContent = balances.USD.toFixed(2);
+      document.getElementById("bal-btc").textContent = balances.BTC.toFixed(4);
+      document.getElementById("bal-eth").textContent = balances.ETH.toFixed(4);
+      document.getElementById("bal-usdt").textContent = balances.USDT.toFixed(2);
+    }
+    function renderHistory(){
+      const tbody = document.getElementById("history");
+      tbody.innerHTML = "";
+      historyData.slice().reverse().forEach(h => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = \`<td>\${h.type}</td><td>\${h.coin}</td><td>$\${h.usd.toFixed(2)}</td><td class="status-\${h.status}">\${h.status.toUpperCase()}</td>\`;
+        tbody.appendChild(tr);
+      });
+    }
+    renderBalances(); renderHistory();
+
+    // === Tabs ===
+    function showPanel(which){
+      document.getElementById("buyPanel").style.display = which === 'buy' ? 'block' : 'none';
+      document.getElementById("sellPanel").style.display = which === 'sell' ? 'block' : 'none';
+      document.getElementById("buyTab").classList.toggle("active", which==='buy');
+      document.getElementById("sellTab").classList.toggle("active", which==='sell');
+    }
+    window.showPanel = showPanel; // expose for onclick
+
+    // === Buy (Paystack) ===
+    function payWithPaystack(){
+      const usd = parseFloat(document.getElementById("buy-usd").value);
+      const coin = document.getElementById("buy-coin").value;
+      if(!usd || usd <= 0){ alert("Enter a valid USD amount."); return; }
+
+      const handler = PaystackPop.setup({
+        key: 'pk_live_b74b2d92842a32feda36c2d4cd98dc50d2944c12',
+        email: 'customer@example.com',
+        amount: Math.round(usd * 100),
+        currency: 'USD',
+        ref: walletId + '-' + Date.now(),
+        metadata: { custom_fields: [
+          { display_name: 'Wallet ID', variable_name: 'wallet_id', value: walletId },
+          { display_name: 'Coin', variable_name: 'coin', value: coin },
+          { display_name: 'USD', variable_name: 'usd_amount', value: usd }
+        ] },
+        callback: function(response){
+          completeBuy(coin, usd);
+          addHistory('BUY', coin, usd, 'completed');
+          alert('Payment successful! Ref: ' + response.reference);
+        },
+        onClose: function(){
+          addHistory('BUY', coin, usd, 'failed');
+          alert('Transaction cancelled.');
+        }
+      });
+      handler.openIframe();
+      addHistory('BUY', coin, usd, 'pending');
+    }
+    window.payWithPaystack = payWithPaystack; // expose
+
+    function completeBuy(coin, usd){
+      // Increase coin, USD unchanged unless you want to reflect bank debit; usually we keep USD as portfolio cash.
+      const qty = usd / rateMap[coin];
+      balances[coin] += qty;
+      // If you want USD to reflect fiat on-ramp, do not deduct; we keep USD as separate cash. Leave as is.
+      persistState();
+      renderBalances();
+    }
+
+    // === Sell ===
+    function sellCoin(){
+      const coin = document.getElementById("sell-coin").value;
+      const amt = parseFloat(document.getElementById("sell-amt").value);
+      if(!amt || amt <= 0){ alert("Enter a valid coin amount."); return; }
+      if(amt > balances[coin]){ alert("Insufficient balance."); return; }
+      const usd = amt * rateMap[coin];
+      balances[coin] -= amt;
+      balances.USD += usd;
+      persistState();
+      renderBalances();
+      addHistory('SELL', coin, usd, 'completed');
+      alert('Sold successfully for $' + usd.toFixed(2));
+    }
+    window.sellCoin = sellCoin; // expose
+
+    // === History helpers ===
+    function addHistory(type, coin, usd, status){
+      historyData.push({ type, coin, usd, status });
+      persistState(); renderHistory();
+    }
+
+    // === Persistence ===
+    function persistState(){
+      localStorage.setItem("balances", JSON.stringify(balances));
+      localStorage.setItem("history", JSON.stringify(historyData));
+    }
+
+    // === Settings ===
+    document.getElementById("resetWalletBtn").addEventListener("click", () => {
+      balances = { USD: 0, BTC: 0, ETH: 0, USDT: 0 };
+      historyData = [];
+      persistState(); renderBalances(); renderHistory();
+      alert("Wallet data cleared for: " + walletId);
+    });
+    document.getElementById("newWalletBtn").addEventListener("click", () => {
+      // Wipe and assign new wallet
+      localStorage.removeItem("balances");
+      localStorage.removeItem("history");
+      walletId = generateWalletId();
+      localStorage.setItem("walletId", walletId);
+      balances = { USD: 0, BTC: 0, ETH: 0, USDT: 0 };
+      historyData = [];
+      persistState(); renderBalances(); renderHistory();
+      document.getElementById("wallet-id").textContent = walletId;
+      alert("New wallet created: " + walletId);
+    });
+  </script>
+</body>
+</html>
